@@ -16,7 +16,8 @@ st.set_page_config(
 )
 
 # ---------- BASE DE DATOS (SQLite, archivo local) ----------
-DB = "nomina.db"
+import os
+DB = "/tmp/nomina.db"
 
 def conectar():
     return sqlite3.connect(DB, check_same_thread=False)

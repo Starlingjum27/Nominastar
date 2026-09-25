@@ -87,6 +87,9 @@ MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
 # ============================================================
 # MÓDULO 1: EMPLEADOS
 # ============================================================
+# ============================================================
+# MÓDULO 1: EMPLEADOS
+# ============================================================
 if menu == "👥 Empleados":
     st.header("Gestión de Empleados")
 
@@ -116,7 +119,6 @@ if menu == "👥 Empleados":
                     except Exception as e:
                         st.error("❌ Error al guardar el empleado.")
                         st.info("💡 Revisa la configuración de Supabase. Es probable que RLS esté bloqueando la operación.")
-                        # st.exception(e) # Descomenta si quieres ver el error técnico
                 else:
                     st.error("⚠️ Completa cédula, nombre y salario")
 
@@ -141,8 +143,13 @@ if menu == "👥 Empleados":
             vista["estado"] = vista["activo"].map({1: "🟢 Activo", 0: "🔴 Inactivo"})
             vista["salario"] = vista["salario"].astype(float).map("{:,.2f}".format)
             
-            st.dataframe(vista[["cedula","nombre","cargo","salario","frecuencia_pago","fecha_ingreso","estado"]],
-                         use_container_width=True, hide_index=True)
+            # --- CORRECCIÓN AQUÍ: Construcción dinámica de columnas ---
+            cols_mostrar = ["cedula", "nombre", "cargo", "salario"]
+            if "frecuencia_pago" in vista.columns:
+                cols_mostrar.append("frecuencia_pago")
+            cols_mostrar.extend(["fecha_ingreso", "estado"])
+            
+            st.dataframe(vista[cols_mostrar], use_container_width=True, hide_index=True)
 
         st.divider()
 
@@ -160,7 +167,9 @@ if menu == "👥 Empleados":
                 nuevo_nombre = st.text_input("Nombre completo", value=datos_emp["nombre"])
                 nuevo_cargo = st.text_input("Cargo", value=datos_emp["cargo"])
                 nuevo_salario = st.number_input("Salario mensual (Bs)", value=float(datos_emp["salario"]), step=0.01)
-                freq_actual = datos_emp.get("frecuencia_pago", "Mensual") if "frecuencia_pago" in datos_emp else "Mensual"
+                
+                # Manejo seguro por si la columna no existe aún en la base de datos
+                freq_actual = datos_emp["frecuencia_pago"] if "frecuencia_pago" in datos_emp else "Mensual"
                 opciones_freq = ["Mensual", "Quincenal", "Semanal"]
                 idx_freq = opciones_freq.index(freq_actual) if freq_actual in opciones_freq else 0
                 nueva_frecuencia = st.selectbox("Frecuencia de Pago", opciones_freq, index=idx_freq)

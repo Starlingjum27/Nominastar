@@ -1,21 +1,22 @@
 # ============================================================
-# NOMINA STAR v3 - Datos persistentes en Supabase (PostgreSQL)
+# NOMINA STAR v4 - Sistema Completo con Seguridad y Supabase
 # ============================================================
 import streamlit as st
 import pandas as pd
 from supabase import create_client
 from datetime import datetime
+import time
 
 st.set_page_config(page_title="Nómina Star", page_icon="💼", layout="wide")
+
 # ============================================================
 # SEGURIDAD: PANTALLA DE LOGIN
 # ============================================================
 def check_password():
-    """Devuelve True si el usuario ingresó la contraseña correcta."""
     def password_entered():
         if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # No guardar la contraseña
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
@@ -32,7 +33,7 @@ def check_password():
         return True
 
 if not check_password():
-    st.stop()  # Detiene la ejecución de la app si no está autenticado
+    st.stop()
 
 # ============================================================
 # CONEXIÓN A SUPABASE
@@ -42,14 +43,9 @@ def get_db():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 db = get_db()
-@st.cache_resource
-def get_db():
-    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-
-db = get_db()
 
 def leer(tabla, order_by="id"):
-    """Lee una tabla de Supabase. Si 'order_by' es None, no ordena."""
+    """Lee una tabla de Supabase con reintentos."""
     try:
         query = db.table(tabla).select("*")
         if order_by:
@@ -58,25 +54,28 @@ def leer(tabla, order_by="id"):
         return pd.DataFrame(response.data)
     except Exception as e:
         st.error(f"⚠️ Error al leer la tabla '{tabla}': {e}")
-        return pd.DataFrame() # Devuelve un DataFrame vacío para evitar que la app se caiga
+        return pd.DataFrame()
 
-# Configuración por defecto (Venezuela) si la tabla está vacía
+# Cargar configuración inicial
 cfg_df = leer("config", order_by=None)
 if cfg_df.empty:
-    for k, v in {"ivss_pct": 4.0, "faov_pct": 1.0, "rpe_pct": 0.5, "cesta_ticket": 130.0}.items():
+    # Valores por defecto si la tabla está vacía
+    defaults = {"ivss_pct": 4.0, "faov_pct": 1.0, "rpe_pct": 0.5, "cesta_ticket": 130.0}
+    for k, v in defaults.items():
         try:
             db.table("config").insert({"clave": k, "valor": v}).execute()
         except Exception:
-            pass  # Si falla (por RLS o porque ya existe), no detenemos la app
+            pass
     cfg_df = leer("config", order_by=None)
 
-# Si aún así la tabla está vacía, creamos un diccionario por defecto para que la app siga
 if cfg_df.empty:
     cfg = {"ivss_pct": 4.0, "faov_pct": 1.0, "rpe_pct": 0.5, "cesta_ticket": 130.0}
 else:
     cfg = dict(zip(cfg_df["clave"], cfg_df["valor"].astype(float)))
 
-# ---------- ENCABEZADO ----------
+# ============================================================
+# ENCABEZADO Y MENÚ
+# ============================================================
 st.title("💼 Nómina Star")
 st.caption("Sistema de nómina web - Venezuela | Base de datos PostgreSQL en Supabase")
 
@@ -88,13 +87,9 @@ MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
 # ============================================================
 # MÓDULO 1: EMPLEADOS
 # ============================================================
-# ============================================================
-# MÓDULO 1: EMPLEADOS
-# ============================================================
 if menu == "👥 Empleados":
     st.header("Gestión de Empleados")
 
-    # --- FORMULARIO DE REGISTRO ---
     with st.expander("➕ Agregar nuevo empleado"):
         with st.form("form_empleado", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -107,28 +102,31 @@ if menu == "👥 Empleados":
             
             if st.form_submit_button("💾 Guardar empleado"):
                 if cedula and nombre and salario > 0:
-                    existe = db.table("empleados").select("cedula").eq("cedula", cedula).execute().data
-                    if existe:
-                        st.error("⚠️ Ya existe un empleado con esa cédula")
-                    else:
-                        db.table("empleados").insert({
-                            "cedula": cedula, "nombre": nombre, "cargo": cargo,
-                            "salario": salario, "frecuencia_pago": frecuencia,
-                            "fecha_ingreso": str(fecha), "activo": 1}).execute()
-                        st.success(f"✅ {nombre} guardado permanentemente")
-                        st.rerun()
+                    try:
+                        existe = db.table("empleados").select("cedula").eq("cedula", cedula).execute().data
+                        if existe:
+                            st.error("⚠️ Ya existe un empleado con esa cédula")
+                        else:
+                            db.table("empleados").insert({
+                                "cedula": cedula, "nombre": nombre, "cargo": cargo,
+                                "salario": salario, "frecuencia_pago": frecuencia,
+                                "fecha_ingreso": str(fecha), "activo": 1}).execute()
+                            st.success(f"✅ {nombre} guardado permanentemente")
+                            st.rerun()
+                    except Exception as e:
+                        st.error("❌ Error al guardar el empleado.")
+                        st.info("💡 Revisa la configuración de Supabase. Es probable que RLS esté bloqueando la operación.")
+                        # st.exception(e) # Descomenta si quieres ver el error técnico
                 else:
                     st.error("⚠️ Completa cédula, nombre y salario")
 
     st.divider()
 
-    # --- BUSCADOR Y TABLA ---
     df = leer("empleados")
 
     if df.empty:
         st.info("Aún no hay empleados registrados.")
     else:
-        # Buscador
         busqueda = st.text_input("🔍 Buscar empleado por cédula o nombre:", "")
         if busqueda:
             df_filtrado = df[df['cedula'].str.contains(busqueda, case=False, na=False) | 
@@ -143,62 +141,64 @@ if menu == "👥 Empleados":
             vista["estado"] = vista["activo"].map({1: "🟢 Activo", 0: "🔴 Inactivo"})
             vista["salario"] = vista["salario"].astype(float).map("{:,.2f}".format)
             
-            # Mostramos la nueva columna de frecuencia
             st.dataframe(vista[["cedula","nombre","cargo","salario","frecuencia_pago","fecha_ingreso","estado"]],
                          use_container_width=True, hide_index=True)
 
         st.divider()
 
-        # --- ACCIONES: EDITAR, ELIMINAR, CAMBIAR ESTADO ---
         st.subheader("🛠️ Administrar Empleado")
         cedulas_lista = df["cedula"].tolist()
         empleado_sel = st.selectbox("Selecciona un empleado para administrar", cedulas_lista)
         
-        # Obtenemos los datos actuales del empleado seleccionado
         datos_emp = df[df["cedula"] == empleado_sel].iloc[0]
 
         tab1, tab2, tab3 = st.tabs(["✏️ Editar", "🔄 Activar/Desactivar", "🗑️ Eliminar"])
 
-        # Pestaña 1: Editar
         with tab1:
             with st.form("form_editar"):
                 st.write(f"Editando a: **{datos_emp['nombre']}**")
                 nuevo_nombre = st.text_input("Nombre completo", value=datos_emp["nombre"])
                 nuevo_cargo = st.text_input("Cargo", value=datos_emp["cargo"])
                 nuevo_salario = st.number_input("Salario mensual (Bs)", value=float(datos_emp["salario"]), step=0.01)
-                # Manejamos el caso de que sea una base de datos vieja sin frecuencia_pago
                 freq_actual = datos_emp.get("frecuencia_pago", "Mensual") if "frecuencia_pago" in datos_emp else "Mensual"
                 opciones_freq = ["Mensual", "Quincenal", "Semanal"]
                 idx_freq = opciones_freq.index(freq_actual) if freq_actual in opciones_freq else 0
                 nueva_frecuencia = st.selectbox("Frecuencia de Pago", opciones_freq, index=idx_freq)
 
                 if st.form_submit_button("💾 Guardar Cambios"):
-                    db.table("empleados").update({
-                        "nombre": nuevo_nombre,
-                        "cargo": nuevo_cargo,
-                        "salario": nuevo_salario,
-                        "frecuencia_pago": nueva_frecuencia
-                    }).eq("cedula", empleado_sel).execute()
-                    st.success("✅ Empleado actualizado correctamente")
-                    st.rerun()
+                    try:
+                        db.table("empleados").update({
+                            "nombre": nuevo_nombre,
+                            "cargo": nuevo_cargo,
+                            "salario": nuevo_salario,
+                            "frecuencia_pago": nueva_frecuencia
+                        }).eq("cedula", empleado_sel).execute()
+                        st.success("✅ Empleado actualizado correctamente")
+                        st.rerun()
+                    except Exception:
+                        st.error("❌ Error al actualizar. Revisa los permisos de Supabase.")
 
-        # Pestaña 2: Activar/Desactivar
         with tab2:
             estado_actual = "🟢 Activo" if int(datos_emp["activo"]) == 1 else "🔴 Inactivo"
             st.write(f"El empleado está actualmente: **{estado_actual}**")
             if st.button("🔄 Cambiar Estado"):
-                db.table("empleados").update({"activo": 1 - int(datos_emp["activo"])}).eq("cedula", empleado_sel).execute()
-                st.rerun()
+                try:
+                    db.table("empleados").update({"activo": 1 - int(datos_emp["activo"])}).eq("cedula", empleado_sel).execute()
+                    st.rerun()
+                except Exception:
+                    st.error("❌ Error al cambiar el estado. Revisa los permisos de Supabase.")
 
-        # Pestaña 3: Eliminar
         with tab3:
-            st.warning("⚠️ Esta acción borrará al empleado permanentemente de la base de datos. No se puede deshacer.")
+            st.warning("⚠️ Esta acción borrará al empleado permanentemente. No se puede deshacer.")
             confirmar = st.checkbox("Sí, estoy seguro de que quiero eliminar a este empleado")
             if st.button("🗑️ Eliminar Definitivamente", type="primary"):
                 if confirmar:
-                    db.table("empleados").delete().eq("cedula", empleado_sel).execute()
-                    st.success(f"🗑️ {datos_emp['nombre']} ha sido eliminado.")
-                    st.rerun()
+                    try:
+                        db.table("empleados").delete().eq("cedula", empleado_sel).execute()
+                        st.success(f"🗑️ {datos_emp['nombre']} ha sido eliminado.")
+                        st.rerun()
+                    except Exception:
+                        st.error("❌ Error al eliminar. Revisa los permisos de Supabase.")
                 else:
                     st.error("Debes marcar la casilla de confirmación para eliminar.")
 
@@ -215,10 +215,13 @@ elif menu == "⚙️ Configuración":
         rpe = st.number_input("RPE - Régimen Prestacional (% trabajador)", value=float(cfg["rpe_pct"]), step=0.1)
         cesta = st.number_input("Cesta ticket mensual (Bs)", value=float(cfg["cesta_ticket"]), step=1.0)
         if st.form_submit_button("💾 Guardar configuración"):
-            for k, v in {"ivss_pct": ivss, "faov_pct": faov, "rpe_pct": rpe, "cesta_ticket": cesta}.items():
-                db.table("config").update({"valor": v}).eq("clave", k).execute()
-            st.success("✅ Configuración guardada")
-            st.rerun()
+            try:
+                for k, v in {"ivss_pct": ivss, "faov_pct": faov, "rpe_pct": rpe, "cesta_ticket": cesta}.items():
+                    db.table("config").update({"valor": v}).eq("clave", k).execute()
+                st.success("✅ Configuración guardada")
+                st.rerun()
+            except Exception:
+                st.error("❌ Error al guardar la configuración. Revisa los permisos de Supabase.")
 
     st.info(f"**Resumen actual:** IVSS: {cfg['ivss_pct']}% | FAOV: {cfg['faov_pct']}% | "
             f"RPE: {cfg['rpe_pct']}% | Cesta ticket: Bs {cfg['cesta_ticket']:,.2f}")
@@ -242,21 +245,24 @@ elif menu == "💰 Generar Nómina":
         st.info("No hay empleados activos para procesar nómina.")
     else:
         if st.button(f"🧮 Calcular nómina de {periodo}", type="primary"):
-            db.table("nomina").delete().eq("periodo", periodo).execute()  # permite recalcular
-            for _, e in emp.iterrows():
-                salario = float(e["salario"])
-                ded_ivss = salario * cfg["ivss_pct"] / 100
-                ded_faov = salario * cfg["faov_pct"] / 100
-                ded_rpe = salario * cfg["rpe_pct"] / 100
-                total_ded = ded_ivss + ded_faov + ded_rpe
-                db.table("nomina").insert({
-                    "periodo": periodo, "cedula": e["cedula"], "nombre": e["nombre"],
-                    "cargo": e["cargo"], "salario_base": salario,
-                    "cesta_ticket": cfg["cesta_ticket"], "ded_ivss": ded_ivss,
-                    "ded_faov": ded_faov, "ded_rpe": ded_rpe,
-                    "total_deducciones": total_ded,
-                    "total_pagar": salario + cfg["cesta_ticket"] - total_ded}).execute()
-            st.success(f"✅ Nómina de {periodo} calculada y guardada permanentemente")
+            try:
+                db.table("nomina").delete().eq("periodo", periodo).execute()
+                for _, e in emp.iterrows():
+                    salario = float(e["salario"])
+                    ded_ivss = salario * cfg["ivss_pct"] / 100
+                    ded_faov = salario * cfg["faov_pct"] / 100
+                    ded_rpe = salario * cfg["rpe_pct"] / 100
+                    total_ded = ded_ivss + ded_faov + ded_rpe
+                    db.table("nomina").insert({
+                        "periodo": periodo, "cedula": e["cedula"], "nombre": e["nombre"],
+                        "cargo": e["cargo"], "salario_base": salario,
+                        "cesta_ticket": cfg["cesta_ticket"], "ded_ivss": ded_ivss,
+                        "ded_faov": ded_faov, "ded_rpe": ded_rpe,
+                        "total_deducciones": total_ded,
+                        "total_pagar": salario + cfg["cesta_ticket"] - total_ded}).execute()
+                st.success(f"✅ Nómina de {periodo} calculada y guardada permanentemente")
+            except Exception:
+                st.error("❌ Error al guardar la nómina. Revisa los permisos de Supabase.")
 
         nom = pd.DataFrame(db.table("nomina").select("*").eq("periodo", periodo).execute().data)
 

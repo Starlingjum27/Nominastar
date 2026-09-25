@@ -14,15 +14,25 @@ def get_db():
 
 db = get_db()
 
-def leer(tabla):
-    return pd.DataFrame(db.table(tabla).select("*").order("id").execute().data)
+def leer(tabla, order_by="id"):
+    """Lee una tabla de Supabase. Si 'order_by' es None, no ordena."""
+    try:
+        query = db.table(tabla).select("*")
+        if order_by:
+            query = query.order(order_by)
+        response = query.execute()
+        return pd.DataFrame(response.data)
+    except Exception as e:
+        st.error(f"⚠️ Error al leer la tabla '{tabla}': {e}")
+        return pd.DataFrame() # Devuelve un DataFrame vacío para evitar que la app se caiga
 
 # Configuración por defecto (Venezuela) si la tabla está vacía
-cfg_df = leer("config")
+# Nota: La tabla 'config' no tiene 'id', así que le pasamos order_by=None
+cfg_df = leer("config", order_by=None)
 if cfg_df.empty:
     for k, v in {"ivss_pct": 4.0, "faov_pct": 1.0, "rpe_pct": 0.5, "cesta_ticket": 130.0}.items():
         db.table("config").insert({"clave": k, "valor": v}).execute()
-    cfg_df = leer("config")
+    cfg_df = leer("config", order_by=None)
 cfg = dict(zip(cfg_df["clave"], cfg_df["valor"].astype(float)))
 
 # ---------- ENCABEZADO ----------
@@ -113,7 +123,8 @@ elif menu == "💰 Generar Nómina":
     periodo = f"{mes} {anio}"
 
     emp = leer("empleados")
-    emp = emp[emp["activo"] == 1]
+    if not emp.empty:
+        emp = emp[emp["activo"] == 1]
 
     if emp.empty:
         st.info("No hay empleados activos para procesar nómina.")

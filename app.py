@@ -7,7 +7,7 @@ from supabase import create_client
 from datetime import datetime
 import time
 
-st.set_page_config(page_title="Nómina Star", page_icon="💼", layout="wide")
+st.set_page_config(page_title="Nómina SJUM", page_icon="💼", layout="wide")
 
 # ============================================================
 # SEGURIDAD: PANTALLA DE LOGIN

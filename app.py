@@ -7,7 +7,41 @@ from supabase import create_client
 from datetime import datetime
 
 st.set_page_config(page_title="Nómina Star", page_icon="💼", layout="wide")
+# ============================================================
+# SEGURIDAD: PANTALLA DE LOGIN
+# ============================================================
+def check_password():
+    """Devuelve True si el usuario ingresó la contraseña correcta."""
+    def password_entered():
+        if st.session_state["password"] == st.secrets["APP_PASSWORD"]:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # No guardar la contraseña
+        else:
+            st.session_state["password_correct"] = False
 
+    if "password_correct" not in st.session_state:
+        st.title("🔒 Acceso Restringido")
+        st.text_input("Ingresa la contraseña del sistema de nómina", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.title("🔒 Acceso Restringido")
+        st.text_input("Ingresa la contraseña del sistema de nómina", type="password", on_change=password_entered, key="password")
+        st.error("😕 Contraseña incorrecta. Intenta de nuevo.")
+        return False
+    else:
+        return True
+
+if not check_password():
+    st.stop()  # Detiene la ejecución de la app si no está autenticado
+
+# ============================================================
+# CONEXIÓN A SUPABASE
+# ============================================================
+@st.cache_resource
+def get_db():
+    return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
+db = get_db()
 @st.cache_resource
 def get_db():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])

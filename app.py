@@ -61,13 +61,20 @@ def leer(tabla, order_by="id"):
         return pd.DataFrame() # Devuelve un DataFrame vacío para evitar que la app se caiga
 
 # Configuración por defecto (Venezuela) si la tabla está vacía
-# Nota: La tabla 'config' no tiene 'id', así que le pasamos order_by=None
 cfg_df = leer("config", order_by=None)
 if cfg_df.empty:
     for k, v in {"ivss_pct": 4.0, "faov_pct": 1.0, "rpe_pct": 0.5, "cesta_ticket": 130.0}.items():
-        db.table("config").insert({"clave": k, "valor": v}).execute()
+        try:
+            db.table("config").insert({"clave": k, "valor": v}).execute()
+        except Exception:
+            pass  # Si falla (por RLS o porque ya existe), no detenemos la app
     cfg_df = leer("config", order_by=None)
-cfg = dict(zip(cfg_df["clave"], cfg_df["valor"].astype(float)))
+
+# Si aún así la tabla está vacía, creamos un diccionario por defecto para que la app siga
+if cfg_df.empty:
+    cfg = {"ivss_pct": 4.0, "faov_pct": 1.0, "rpe_pct": 0.5, "cesta_ticket": 130.0}
+else:
+    cfg = dict(zip(cfg_df["clave"], cfg_df["valor"].astype(float)))
 
 # ---------- ENCABEZADO ----------
 st.title("💼 Nómina Star")
@@ -81,17 +88,23 @@ MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
 # ============================================================
 # MÓDULO 1: EMPLEADOS
 # ============================================================
+# ============================================================
+# MÓDULO 1: EMPLEADOS
+# ============================================================
 if menu == "👥 Empleados":
     st.header("Gestión de Empleados")
 
+    # --- FORMULARIO DE REGISTRO ---
     with st.expander("➕ Agregar nuevo empleado"):
         with st.form("form_empleado", clear_on_submit=True):
             col1, col2 = st.columns(2)
             cedula = col1.text_input("Cédula (V-12345678)")
             nombre = col2.text_input("Nombre completo")
             cargo = col1.text_input("Cargo")
-            salario = col2.number_input("Salario mensual (Bs)", min_value=0.0, step=0.01)
-            fecha = col1.date_input("Fecha de ingreso", datetime.now())
+            salario = col2.number_input("Salario mensual base (Bs)", min_value=0.0, step=0.01)
+            frecuencia = col1.selectbox("Frecuencia de Pago", ["Mensual", "Quincenal", "Semanal"])
+            fecha = col2.date_input("Fecha de ingreso", datetime.now())
+            
             if st.form_submit_button("💾 Guardar empleado"):
                 if cedula and nombre and salario > 0:
                     existe = db.table("empleados").select("cedula").eq("cedula", cedula).execute().data
@@ -100,29 +113,94 @@ if menu == "👥 Empleados":
                     else:
                         db.table("empleados").insert({
                             "cedula": cedula, "nombre": nombre, "cargo": cargo,
-                            "salario": salario, "fecha_ingreso": str(fecha), "activo": 1}).execute()
+                            "salario": salario, "frecuencia_pago": frecuencia,
+                            "fecha_ingreso": str(fecha), "activo": 1}).execute()
                         st.success(f"✅ {nombre} guardado permanentemente")
                         st.rerun()
                 else:
                     st.error("⚠️ Completa cédula, nombre y salario")
 
+    st.divider()
+
+    # --- BUSCADOR Y TABLA ---
     df = leer("empleados")
 
     if df.empty:
         st.info("Aún no hay empleados registrados.")
     else:
-        vista = df.copy()
-        vista["estado"] = vista["activo"].map({1: "🟢 Activo", 0: "🔴 Inactivo"})
-        vista["salario"] = vista["salario"].astype(float).map("{:,.2f}".format)
-        st.dataframe(vista[["cedula","nombre","cargo","salario","fecha_ingreso","estado"]],
-                     use_container_width=True, hide_index=True)
+        # Buscador
+        busqueda = st.text_input("🔍 Buscar empleado por cédula o nombre:", "")
+        if busqueda:
+            df_filtrado = df[df['cedula'].str.contains(busqueda, case=False, na=False) | 
+                             df['nombre'].str.contains(busqueda, case=False, na=False)]
+        else:
+            df_filtrado = df
 
-        col_a, col_b = st.columns(2)
-        con_cedula = col_a.selectbox("Empleado a cambiar estado", vista["cedula"].tolist())
-        if col_b.button("🔄 Activar / Desactivar"):
-            fila = df[df["cedula"] == con_cedula].iloc[0]
-            db.table("empleados").update({"activo": 1 - int(fila["activo"])}).eq("cedula", con_cedula).execute()
-            st.rerun()
+        if df_filtrado.empty:
+            st.warning("No se encontraron empleados con esa búsqueda.")
+        else:
+            vista = df_filtrado.copy()
+            vista["estado"] = vista["activo"].map({1: "🟢 Activo", 0: "🔴 Inactivo"})
+            vista["salario"] = vista["salario"].astype(float).map("{:,.2f}".format)
+            
+            # Mostramos la nueva columna de frecuencia
+            st.dataframe(vista[["cedula","nombre","cargo","salario","frecuencia_pago","fecha_ingreso","estado"]],
+                         use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # --- ACCIONES: EDITAR, ELIMINAR, CAMBIAR ESTADO ---
+        st.subheader("🛠️ Administrar Empleado")
+        cedulas_lista = df["cedula"].tolist()
+        empleado_sel = st.selectbox("Selecciona un empleado para administrar", cedulas_lista)
+        
+        # Obtenemos los datos actuales del empleado seleccionado
+        datos_emp = df[df["cedula"] == empleado_sel].iloc[0]
+
+        tab1, tab2, tab3 = st.tabs(["✏️ Editar", "🔄 Activar/Desactivar", "🗑️ Eliminar"])
+
+        # Pestaña 1: Editar
+        with tab1:
+            with st.form("form_editar"):
+                st.write(f"Editando a: **{datos_emp['nombre']}**")
+                nuevo_nombre = st.text_input("Nombre completo", value=datos_emp["nombre"])
+                nuevo_cargo = st.text_input("Cargo", value=datos_emp["cargo"])
+                nuevo_salario = st.number_input("Salario mensual (Bs)", value=float(datos_emp["salario"]), step=0.01)
+                # Manejamos el caso de que sea una base de datos vieja sin frecuencia_pago
+                freq_actual = datos_emp.get("frecuencia_pago", "Mensual") if "frecuencia_pago" in datos_emp else "Mensual"
+                opciones_freq = ["Mensual", "Quincenal", "Semanal"]
+                idx_freq = opciones_freq.index(freq_actual) if freq_actual in opciones_freq else 0
+                nueva_frecuencia = st.selectbox("Frecuencia de Pago", opciones_freq, index=idx_freq)
+
+                if st.form_submit_button("💾 Guardar Cambios"):
+                    db.table("empleados").update({
+                        "nombre": nuevo_nombre,
+                        "cargo": nuevo_cargo,
+                        "salario": nuevo_salario,
+                        "frecuencia_pago": nueva_frecuencia
+                    }).eq("cedula", empleado_sel).execute()
+                    st.success("✅ Empleado actualizado correctamente")
+                    st.rerun()
+
+        # Pestaña 2: Activar/Desactivar
+        with tab2:
+            estado_actual = "🟢 Activo" if int(datos_emp["activo"]) == 1 else "🔴 Inactivo"
+            st.write(f"El empleado está actualmente: **{estado_actual}**")
+            if st.button("🔄 Cambiar Estado"):
+                db.table("empleados").update({"activo": 1 - int(datos_emp["activo"])}).eq("cedula", empleado_sel).execute()
+                st.rerun()
+
+        # Pestaña 3: Eliminar
+        with tab3:
+            st.warning("⚠️ Esta acción borrará al empleado permanentemente de la base de datos. No se puede deshacer.")
+            confirmar = st.checkbox("Sí, estoy seguro de que quiero eliminar a este empleado")
+            if st.button("🗑️ Eliminar Definitivamente", type="primary"):
+                if confirmar:
+                    db.table("empleados").delete().eq("cedula", empleado_sel).execute()
+                    st.success(f"🗑️ {datos_emp['nombre']} ha sido eliminado.")
+                    st.rerun()
+                else:
+                    st.error("Debes marcar la casilla de confirmación para eliminar.")
 
 # ============================================================
 # MÓDULO 2: CONFIGURACIÓN

@@ -87,9 +87,6 @@ MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
 # ============================================================
 # MÓDULO 1: EMPLEADOS
 # ============================================================
-# ============================================================
-# MÓDULO 1: EMPLEADOS
-# ============================================================
 if menu == "👥 Empleados":
     st.header("Gestión de Empleados")
 
@@ -106,19 +103,27 @@ if menu == "👥 Empleados":
             if st.form_submit_button("💾 Guardar empleado"):
                 if cedula and nombre and salario > 0:
                     try:
+                        # Verificamos si ya existe
                         existe = db.table("empleados").select("cedula").eq("cedula", cedula).execute().data
                         if existe:
                             st.error("⚠️ Ya existe un empleado con esa cédula")
                         else:
+                            # Insertamos el nuevo empleado
                             db.table("empleados").insert({
-                                "cedula": cedula, "nombre": nombre, "cargo": cargo,
-                                "salario": salario, "frecuencia_pago": frecuencia,
-                                "fecha_ingreso": str(fecha), "activo": 1}).execute()
+                                "cedula": cedula, 
+                                "nombre": nombre, 
+                                "cargo": cargo,
+                                "salario": salario, 
+                                "frecuencia_pago": frecuencia,
+                                "fecha_ingreso": str(fecha), 
+                                "activo": 1
+                            }).execute()
                             st.success(f"✅ {nombre} guardado permanentemente")
                             st.rerun()
                     except Exception as e:
                         st.error("❌ Error al guardar el empleado.")
-                        st.info("💡 Revisa la configuración de Supabase. Es probable que RLS esté bloqueando la operación.")
+                        st.warning("🔍 Aquí está el error real de Supabase (cópialo y pégamelo):")
+                        st.exception(e) # <--- ESTO NOS MOSTRARÁ EL ERROR REAL
                 else:
                     st.error("⚠️ Completa cédula, nombre y salario")
 
@@ -143,7 +148,6 @@ if menu == "👥 Empleados":
             vista["estado"] = vista["activo"].map({1: "🟢 Activo", 0: "🔴 Inactivo"})
             vista["salario"] = vista["salario"].astype(float).map("{:,.2f}".format)
             
-            # --- CORRECCIÓN AQUÍ: Construcción dinámica de columnas ---
             cols_mostrar = ["cedula", "nombre", "cargo", "salario"]
             if "frecuencia_pago" in vista.columns:
                 cols_mostrar.append("frecuencia_pago")
@@ -168,7 +172,6 @@ if menu == "👥 Empleados":
                 nuevo_cargo = st.text_input("Cargo", value=datos_emp["cargo"])
                 nuevo_salario = st.number_input("Salario mensual (Bs)", value=float(datos_emp["salario"]), step=0.01)
                 
-                # Manejo seguro por si la columna no existe aún en la base de datos
                 freq_actual = datos_emp["frecuencia_pago"] if "frecuencia_pago" in datos_emp else "Mensual"
                 opciones_freq = ["Mensual", "Quincenal", "Semanal"]
                 idx_freq = opciones_freq.index(freq_actual) if freq_actual in opciones_freq else 0
@@ -184,8 +187,9 @@ if menu == "👥 Empleados":
                         }).eq("cedula", empleado_sel).execute()
                         st.success("✅ Empleado actualizado correctamente")
                         st.rerun()
-                    except Exception:
+                    except Exception as e:
                         st.error("❌ Error al actualizar. Revisa los permisos de Supabase.")
+                        st.exception(e)
 
         with tab2:
             estado_actual = "🟢 Activo" if int(datos_emp["activo"]) == 1 else "🔴 Inactivo"
@@ -194,8 +198,9 @@ if menu == "👥 Empleados":
                 try:
                     db.table("empleados").update({"activo": 1 - int(datos_emp["activo"])}).eq("cedula", empleado_sel).execute()
                     st.rerun()
-                except Exception:
+                except Exception as e:
                     st.error("❌ Error al cambiar el estado. Revisa los permisos de Supabase.")
+                    st.exception(e)
 
         with tab3:
             st.warning("⚠️ Esta acción borrará al empleado permanentemente. No se puede deshacer.")
@@ -206,11 +211,11 @@ if menu == "👥 Empleados":
                         db.table("empleados").delete().eq("cedula", empleado_sel).execute()
                         st.success(f"🗑️ {datos_emp['nombre']} ha sido eliminado.")
                         st.rerun()
-                    except Exception:
+                    except Exception as e:
                         st.error("❌ Error al eliminar. Revisa los permisos de Supabase.")
+                        st.exception(e)
                 else:
                     st.error("Debes marcar la casilla de confirmación para eliminar.")
-
 # ============================================================
 # MÓDULO 2: CONFIGURACIÓN
 # ============================================================

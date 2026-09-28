@@ -8,6 +8,42 @@ from datetime import datetime
 import time
 
 st.set_page_config(page_title="Nómina SJUM", page_icon="💼", layout="wide")
+# ============================================================
+# FUNCIONES AUXILIARES DE TASA BCV
+# ============================================================
+from tasa_bcv import obtener_tasa_bcv
+
+def obtener_tasa_del_dia(fecha=None):
+    """Obtiene la tasa BCV para una fecha dada (o la más reciente)."""
+    if fecha is None:
+        fecha = datetime.now().strftime("%Y-%m-%d")
+    result = db.table("tasa_bcv").select("*").eq("fecha", fecha).execute().data
+    if result:
+        return result[0]
+    # Si no hay para esa fecha, buscar la más reciente
+    result = db.table("tasa_bcv").select("*").order("fecha", desc=True).limit(1).execute().data
+    return result[0] if result else None
+
+def guardar_tasa(fecha, tasa, fuente="manual", usuario="admin"):
+    """Guarda o actualiza la tasa BCV del día."""
+    try:
+        existente = db.table("tasa_bcv").select("id").eq("fecha", fecha).execute().data
+        if existente:
+            db.table("tasa_bcv").update({
+                "tasa_usd_bs": tasa,
+                "fuente": fuente,
+                "usuario": usuario
+            }).eq("fecha", fecha).execute()
+        else:
+            db.table("tasa_bcv").insert({
+                "fecha": fecha,
+                "tasa_usd_bs": tasa,
+                "fuente": fuente,
+                "usuario": usuario
+            }).execute()
+        return True
+    except Exception as e:
+        return False
 
 # ============================================================
 # SEGURIDAD: PANTALLA DE LOGIN
@@ -79,7 +115,7 @@ else:
 st.title("💼 Nómina Star")
 st.caption("Sistema de nómina web - Venezuela | Base de datos PostgreSQL en Supabase")
 
-menu = st.sidebar.radio("📋 MENÚ", ["👥 Empleados", "⚙️ Configuración", "💰 Generar Nómina", "📜 Historial"])
+menu = st.sidebar.radio("📋 MENÚ", ["👥 Empleados", "💱 Tasa BCV", "⚙️ Configuración", "💰 Generar Nómina", "📜 Historial"])
 
 MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
          "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
@@ -216,6 +252,64 @@ if menu == "👥 Empleados":
                         st.exception(e)
                 else:
                     st.error("Debes marcar la casilla de confirmación para eliminar.")
+# ============================================================
+# MÓDULO: TASA BCV
+# ============================================================
+elif menu == "💱 Tasa BCV":
+    st.header("💱 Gestión de la Tasa BCV")
+    st.caption("La tasa oficial del Banco Central de Venezuela se usa para convertir salarios USD a Bs.")
+    
+    # --- CARGA AUTOMÁTICA ---
+    st.subheader("🤖 Carga Automática")
+    if st.button("🔄 Obtener tasa del BCV ahora", type="primary"):
+        with st.spinner("Consultando bcv.org.ve..."):
+            resultado = obtener_tasa_bcv()
+            if resultado:
+                exito = guardar_tasa(resultado["fecha"], resultado["tasa"], "automatica", "sistema")
+                if exito:
+                    st.success(f"✅ Tasa obtenida: **{resultado['tasa']:.2f} Bs/USD** (Fecha: {resultado['fecha']})")
+                    st.rerun()
+                else:
+                    st.error("❌ Error al guardar la tasa en Supabase.")
+            else:
+                st.warning("⚠️ No se pudo obtener la tasa automáticamente. El sitio del BCV puede estar caído o cambió su estructura.")
+                st.info("💡 Usa la carga manual de abajo.")
+    
+    st.divider()
+    
+    # --- CARGA MANUAL ---
+    st.subheader("✍️ Carga Manual")
+    st.info("Usa esta opción si la carga automática falla o si necesitas corregir un valor.")
+    
+    with st.form("form_tasa_manual"):
+        fecha_manual = st.date_input("Fecha de la tasa", datetime.now())
+        tasa_manual = st.number_input("Tasa USD → Bs", min_value=0.0, step=0.01, format="%.2f")
+        if st.form_submit_button("💾 Guardar tasa manual"):
+            if tasa_manual > 0:
+                exito = guardar_tasa(str(fecha_manual), tasa_manual, "manual", "admin")
+                if exito:
+                    st.success(f"✅ Tasa guardada: **{tasa_manual:.2f} Bs/USD** para el {fecha_manual}")
+                    st.rerun()
+                else:
+                    st.error("❌ Error al guardar.")
+            else:
+                st.error("⚠️ La tasa debe ser mayor a 0.")
+    
+    st.divider()
+    
+    # --- HISTORIAL ---
+    st.subheader("📜 Historial de Tasas")
+    tasas = leer("tasa_bcv")
+    if tasas.empty:
+        st.info("No hay tasas registradas aún.")
+    else:
+        tasas = tasas.sort_values("fecha", ascending=False)
+        for _, t in tasas.iterrows():
+            fuente_icono = "🤖" if t["fuente"] == "automatica" else "✍️"
+            st.write(f"{fuente_icono} **{t['fecha']}** → **{float(t['tasa_usd_bs']):,.2f} Bs/USD** ({t['fuente']})")
+        
+        csv = tasas.to_csv(index=False).encode("utf-8")
+        st.download_button("📥 Descargar historial (CSV)", csv, "tasa_bcv_historial.csv", "text/csv")   
 # ============================================================
 # MÓDULO 2: CONFIGURACIÓN
 # ============================================================

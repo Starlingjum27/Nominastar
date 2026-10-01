@@ -121,137 +121,268 @@ MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
          "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"]
 
 # ============================================================
-# MÓDULO 1: EMPLEADOS
+# MÓDULO 1: EMPLEADOS (Ficha completa LOTTT + Dual Moneda)
 # ============================================================
 if menu == "👥 Empleados":
     st.header("Gestión de Empleados")
 
-    with st.expander("➕ Agregar nuevo empleado"):
-        with st.form("form_empleado", clear_on_submit=True):
+    tab_registro, tab_lista = st.tabs(["➕ Registrar / Editar", "📋 Lista y Administración"])
+
+    # ------------------------------------------------------------
+    # PESTAÑA 1: REGISTRO
+    # ------------------------------------------------------------
+    with tab_registro:
+        st.subheader("Ficha del Empleado")
+        st.caption("Completa los campos. Los marcados con * son obligatorios.")
+
+        with st.form("form_empleado_completo", clear_on_submit=True):
+            # --- DATOS PERSONALES ---
+            st.markdown("#### 👤 Datos Personales")
+            col1, col2, col3 = st.columns([1, 2, 2])
+            tipo_cedula = col1.selectbox("Tipo *", ["V", "E", "J", "P"])
+            cedula_num = col2.text_input("Cédula * (solo números)")
+            nombre = col3.text_input("Nombre completo *")
+
+            col1, col2, col3 = st.columns(3)
+            fecha_nac = col1.date_input("Fecha de nacimiento", datetime(1990, 1, 1))
+            telefono = col2.text_input("Teléfono")
+            email = col3.text_input("Email")
+
+            direccion = st.text_area("Dirección", height=68)
+
+            # --- DATOS LABORALES ---
+            st.markdown("#### 💼 Datos Laborales")
+            col1, col2, col3 = st.columns(3)
+            cargo = col1.text_input("Cargo *")
+            departamento = col2.text_input("Departamento")
+            centro_costo = col3.text_input("Centro de costo")
+
+            col1, col2, col3 = st.columns(3)
+            tipo_contrato = col1.selectbox("Tipo de contrato", ["INDEFINIDO", "FIJO", "OBRA", "TEMPORADO"])
+            frecuencia = col2.selectbox("Frecuencia de pago", ["Mensual", "Quincenal", "Semanal"])
+            estatus_lottt = col3.selectbox("Estatus", ["ACTIVO", "SUSPENDIDO", "VACACIONES", "EGRESADO"])
+
             col1, col2 = st.columns(2)
-            cedula = col1.text_input("Cédula (V-12345678)")
-            nombre = col2.text_input("Nombre completo")
-            cargo = col1.text_input("Cargo")
-            salario = col2.number_input("Salario mensual base (Bs)", min_value=0.0, step=0.01)
-            frecuencia = col1.selectbox("Frecuencia de Pago", ["Mensual", "Quincenal", "Semanal"])
-            fecha = col2.date_input("Fecha de ingreso", datetime.now())
-            
-            if st.form_submit_button("💾 Guardar empleado"):
-                if cedula and nombre and salario > 0:
+            fecha_ingreso = col1.date_input("Fecha de ingreso *", datetime.now())
+            fecha_egreso = col2.date_input("Fecha de egreso (si aplica)", datetime.now())
+
+            # --- SALARIO DUAL ---
+            st.markdown("#### 💵 Salario (Dual Moneda)")
+            col1, col2, col3 = st.columns(3)
+            salario_usd = col1.number_input("Salario mensual en USD *", min_value=0.0, step=1.0, format="%.2f")
+            tipo_pago = col2.selectbox("Tipo de pago", ["BS", "USD", "MIXTO"])
+            porcentaje_usd = col3.number_input("% pagado en USD (si es MIXTO)", min_value=0.0, max_value=100.0, step=1.0)
+
+            # --- DATOS BANCARIOS ---
+            st.markdown("#### 🏦 Datos Bancarios")
+            col1, col2, col3 = st.columns(3)
+            banco = col1.text_input("Banco")
+            cuenta_bancaria = col2.text_input("Número de cuenta")
+            titular_cuenta = col3.text_input("Titular de la cuenta")
+
+            # --- BOTÓN DE GUARDAR ---
+            if st.form_submit_button("💾 Guardar empleado", type="primary"):
+                cedula_completa = f"{tipo_cedula}-{cedula_num.strip()}"
+
+                if not cedula_num or not nombre or not cargo or salario_usd <= 0:
+                    st.error("⚠️ Completa los campos obligatorios: cédula, nombre, cargo y salario USD.")
+                else:
                     try:
-                        # Verificamos si ya existe
-                        existe = db.table("empleados").select("cedula").eq("cedula", cedula).execute().data
+                        existe = db.table("empleados").select("cedula").eq("cedula", cedula_completa).execute().data
                         if existe:
-                            st.error("⚠️ Ya existe un empleado con esa cédula")
+                            st.error(f"⚠️ Ya existe un empleado con la cédula {cedula_completa}")
                         else:
-                            # Insertamos el nuevo empleado
                             db.table("empleados").insert({
-                                "cedula": cedula, 
-                                "nombre": nombre, 
+                                "cedula": cedula_completa,
+                                "tipo_cedula": tipo_cedula,
+                                "nombre": nombre,
+                                "fecha_nacimiento": str(fecha_nac),
+                                "telefono": telefono,
+                                "email": email,
+                                "direccion": direccion,
                                 "cargo": cargo,
-                                "salario": salario, 
+                                "departamento": departamento,
+                                "centro_costo": centro_costo,
+                                "tipo_contrato": tipo_contrato,
                                 "frecuencia_pago": frecuencia,
-                                "fecha_ingreso": str(fecha), 
+                                "estatus_lottt": estatus_lottt,
+                                "fecha_ingreso": str(fecha_ingreso),
+                                "fecha_egreso": str(fecha_egreso) if estatus_lottt == "EGRESADO" else None,
+                                "salario_usd": salario_usd,
+                                "salario": 0,  # Se calculará en Bs al generar nómina
+                                "tipo_pago": tipo_pago,
+                                "porcentaje_usd": porcentaje_usd,
+                                "banco": banco,
+                                "cuenta_bancaria": cuenta_bancaria,
+                                "titular_cuenta": titular_cuenta,
                                 "activo": 1
                             }).execute()
-                            st.success(f"✅ {nombre} guardado permanentemente")
+                            st.success(f"✅ {nombre} ({cedula_completa}) guardado exitosamente.")
                             st.rerun()
                     except Exception as e:
-                        st.error("❌ Error al guardar el empleado.")
-                        st.warning("🔍 Aquí está el error real de Supabase (cópialo y pégamelo):")
-                        st.exception(e) # <--- ESTO NOS MOSTRARÁ EL ERROR REAL
-                else:
-                    st.error("⚠️ Completa cédula, nombre y salario")
+                        st.error(f"❌ Error al guardar: {e}")
 
-    st.divider()
+    # ------------------------------------------------------------
+    # PESTAÑA 2: LISTA Y ADMINISTRACIÓN
+    # ------------------------------------------------------------
+    with tab_lista:
+        df = leer("empleados")
 
-    df = leer("empleados")
-
-    if df.empty:
-        st.info("Aún no hay empleados registrados.")
-    else:
-        busqueda = st.text_input("🔍 Buscar empleado por cédula o nombre:", "")
-        if busqueda:
-            df_filtrado = df[df['cedula'].str.contains(busqueda, case=False, na=False) | 
-                             df['nombre'].str.contains(busqueda, case=False, na=False)]
+        if df.empty:
+            st.info("Aún no hay empleados registrados.")
         else:
-            df_filtrado = df
+            # Buscador
+            busqueda = st.text_input("🔍 Buscar por cédula, nombre o departamento:", "")
+            if busqueda:
+                df_filtrado = df[
+                    df["cedula"].str.contains(busqueda, case=False, na=False) |
+                    df["nombre"].str.contains(busqueda, case=False, na=False) |
+                    df.get("departamento", pd.Series(dtype=str)).astype(str).str.contains(busqueda, case=False, na=False)
+                ]
+            else:
+                df_filtrado = df
 
-        if df_filtrado.empty:
-            st.warning("No se encontraron empleados con esa búsqueda.")
-        else:
-            vista = df_filtrado.copy()
-            vista["estado"] = vista["activo"].map({1: "🟢 Activo", 0: "🔴 Inactivo"})
-            vista["salario"] = vista["salario"].astype(float).map("{:,.2f}".format)
-            
-            cols_mostrar = ["cedula", "nombre", "cargo", "salario"]
-            if "frecuencia_pago" in vista.columns:
-                cols_mostrar.append("frecuencia_pago")
-            cols_mostrar.extend(["fecha_ingreso", "estado"])
-            
-            st.dataframe(vista[cols_mostrar], use_container_width=True, hide_index=True)
+            if df_filtrado.empty:
+                st.warning("No se encontraron empleados con esa búsqueda.")
+            else:
+                vista = df_filtrado.copy()
+                vista["estado"] = vista["activo"].map({1: "🟢 Activo", 0: "🔴 Inactivo"})
 
-        st.divider()
+                # Construir columnas dinámicamente
+                cols = ["cedula", "nombre", "cargo"]
+                if "departamento" in vista.columns:
+                    cols.append("departamento")
+                if "salario_usd" in vista.columns:
+                    vista["salario_usd"] = vista["salario_usd"].astype(float).map("$ {:,.2f}".format)
+                    cols.append("salario_usd")
+                if "frecuencia_pago" in vista.columns:
+                    cols.append("frecuencia_pago")
+                cols.extend(["fecha_ingreso", "estado"])
 
-        st.subheader("🛠️ Administrar Empleado")
-        cedulas_lista = df["cedula"].tolist()
-        empleado_sel = st.selectbox("Selecciona un empleado para administrar", cedulas_lista)
-        
-        datos_emp = df[df["cedula"] == empleado_sel].iloc[0]
+                st.dataframe(vista[cols], use_container_width=True, hide_index=True)
 
-        tab1, tab2, tab3 = st.tabs(["✏️ Editar", "🔄 Activar/Desactivar", "🗑️ Eliminar"])
+            st.divider()
 
-        with tab1:
-            with st.form("form_editar"):
-                st.write(f"Editando a: **{datos_emp['nombre']}**")
-                nuevo_nombre = st.text_input("Nombre completo", value=datos_emp["nombre"])
-                nuevo_cargo = st.text_input("Cargo", value=datos_emp["cargo"])
-                nuevo_salario = st.number_input("Salario mensual (Bs)", value=float(datos_emp["salario"]), step=0.01)
-                
-                freq_actual = datos_emp["frecuencia_pago"] if "frecuencia_pago" in datos_emp else "Mensual"
-                opciones_freq = ["Mensual", "Quincenal", "Semanal"]
-                idx_freq = opciones_freq.index(freq_actual) if freq_actual in opciones_freq else 0
-                nueva_frecuencia = st.selectbox("Frecuencia de Pago", opciones_freq, index=idx_freq)
+            # --- ADMINISTRAR EMPLEADO ---
+            st.subheader("🛠️ Administrar Empleado")
+            cedulas_lista = df["cedula"].tolist()
+            empleado_sel = st.selectbox("Selecciona un empleado", cedulas_lista)
+            datos_emp = df[df["cedula"] == empleado_sel].iloc[0]
 
-                if st.form_submit_button("💾 Guardar Cambios"):
+            tab_edit, tab_estado, tab_hist, tab_elim = st.tabs(
+                ["✏️ Editar", "🔄 Estatus", "📊 Historial Salarial", "🗑️ Eliminar"]
+            )
+
+            # --- EDITAR ---
+            with tab_edit:
+                with st.form("form_editar_emp"):
+                    st.write(f"Editando a: **{datos_emp['nombre']}** ({datos_emp['cedula']})")
+
+                    col1, col2, col3 = st.columns(3)
+                    nuevo_nombre = col1.text_input("Nombre", value=datos_emp["nombre"])
+                    nuevo_cargo = col2.text_input("Cargo", value=datos_emp.get("cargo", "") or "")
+                    nuevo_depto = col3.text_input("Departamento", value=datos_emp.get("departamento", "") or "")
+
+                    col1, col2, col3 = st.columns(3)
+                    salario_actual = float(datos_emp.get("salario_usd", 0) or 0)
+                    nuevo_salario_usd = col1.number_input("Salario USD", value=salario_actual, step=1.0, format="%.2f")
+                    freq_actual = datos_emp.get("frecuencia_pago", "Mensual") or "Mensual"
+                    opciones_freq = ["Mensual", "Quincenal", "Semanal"]
+                    idx_freq = opciones_freq.index(freq_actual) if freq_actual in opciones_freq else 0
+                    nueva_frecuencia = col2.selectbox("Frecuencia", opciones_freq, index=idx_freq)
+
+                    tipo_pago_actual = datos_emp.get("tipo_pago", "BS") or "BS"
+                    opciones_tipo = ["BS", "USD", "MIXTO"]
+                    idx_tipo = opciones_tipo.index(tipo_pago_actual) if tipo_pago_actual in opciones_tipo else 0
+                    nuevo_tipo_pago = col3.selectbox("Tipo de pago", opciones_tipo, index=idx_tipo)
+
+                    col1, col2 = st.columns(2)
+                    nuevo_telefono = col1.text_input("Teléfono", value=datos_emp.get("telefono", "") or "")
+                    nuevo_email = col2.text_input("Email", value=datos_emp.get("email", "") or "")
+
+                    motivo = st.text_input("Motivo del cambio (opcional, para auditoría)", "")
+
+                    if st.form_submit_button("💾 Guardar cambios"):
+                        try:
+                            # Si cambió el salario, registrar en historial
+                            if nuevo_salario_usd != salario_actual:
+                                db.table("historial_salarial").insert({
+                                    "cedula": empleado_sel,
+                                    "salario_usd_anterior": salario_actual,
+                                    "salario_usd_nuevo": nuevo_salario_usd,
+                                    "motivo": motivo or "Ajuste sin motivo especificado",
+                                    "usuario": "admin"
+                                }).execute()
+
+                            db.table("empleados").update({
+                                "nombre": nuevo_nombre,
+                                "cargo": nuevo_cargo,
+                                "departamento": nuevo_depto,
+                                "salario_usd": nuevo_salario_usd,
+                                "frecuencia_pago": nueva_frecuencia,
+                                "tipo_pago": nuevo_tipo_pago,
+                                "telefono": nuevo_telefono,
+                                "email": nuevo_email
+                            }).eq("cedula", empleado_sel).execute()
+
+                            st.success("✅ Empleado actualizado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al actualizar: {e}")
+
+            # --- CAMBIAR ESTATUS ---
+            with tab_estado:
+                estatus_actual = datos_emp.get("estatus_lottt", "ACTIVO") or "ACTIVO"
+                st.write(f"Estatus actual: **{estatus_actual}**")
+                nuevo_estatus = st.selectbox(
+                    "Cambiar estatus a:",
+                    ["ACTIVO", "SUSPENDIDO", "VACACIONES", "EGRESADO"],
+                    index=["ACTIVO", "SUSPENDIDO", "VACACIONES", "EGRESADO"].index(estatus_actual) if estatus_actual in ["ACTIVO", "SUSPENDIDO", "VACACIONES", "EGRESADO"] else 0
+                )
+                if st.button("🔄 Actualizar estatus"):
                     try:
+                        activo = 1 if nuevo_estatus == "ACTIVO" else 0
                         db.table("empleados").update({
-                            "nombre": nuevo_nombre,
-                            "cargo": nuevo_cargo,
-                            "salario": nuevo_salario,
-                            "frecuencia_pago": nueva_frecuencia
+                            "estatus_lottt": nuevo_estatus,
+                            "activo": activo
                         }).eq("cedula", empleado_sel).execute()
-                        st.success("✅ Empleado actualizado correctamente")
+                        st.success(f"✅ Estatus cambiado a {nuevo_estatus}")
                         st.rerun()
                     except Exception as e:
-                        st.error("❌ Error al actualizar. Revisa los permisos de Supabase.")
-                        st.exception(e)
+                        st.error(f"❌ Error: {e}")
 
-        with tab2:
-            estado_actual = "🟢 Activo" if int(datos_emp["activo"]) == 1 else "🔴 Inactivo"
-            st.write(f"El empleado está actualmente: **{estado_actual}**")
-            if st.button("🔄 Cambiar Estado"):
-                try:
-                    db.table("empleados").update({"activo": 1 - int(datos_emp["activo"])}).eq("cedula", empleado_sel).execute()
-                    st.rerun()
-                except Exception as e:
-                    st.error("❌ Error al cambiar el estado. Revisa los permisos de Supabase.")
-                    st.exception(e)
-
-        with tab3:
-            st.warning("⚠️ Esta acción borrará al empleado permanentemente. No se puede deshacer.")
-            confirmar = st.checkbox("Sí, estoy seguro de que quiero eliminar a este empleado")
-            if st.button("🗑️ Eliminar Definitivamente", type="primary"):
-                if confirmar:
-                    try:
-                        db.table("empleados").delete().eq("cedula", empleado_sel).execute()
-                        st.success(f"🗑️ {datos_emp['nombre']} ha sido eliminado.")
-                        st.rerun()
-                    except Exception as e:
-                        st.error("❌ Error al eliminar. Revisa los permisos de Supabase.")
-                        st.exception(e)
+            # --- HISTORIAL SALARIAL ---
+            with tab_hist:
+                hist = leer("historial_salarial")
+                if hist.empty:
+                    st.info("No hay cambios salariales registrados para este empleado.")
                 else:
-                    st.error("Debes marcar la casilla de confirmación para eliminar.")
+                    hist_emp = hist[hist["cedula"] == empleado_sel].sort_values("created_at", ascending=False)
+                    if hist_emp.empty:
+                        st.info("Este empleado no tiene cambios salariales registrados.")
+                    else:
+                        for _, h in hist_emp.iterrows():
+                            st.write(
+                                f"📅 **{h['created_at'][:10]}** — "
+                                f"${float(h['salario_usd_anterior']):,.2f} → "
+                                f"**${float(h['salario_usd_nuevo']):,.2f}** — "
+                                f"_{h.get('motivo', 'Sin motivo')}_"
+                            )
+
+            # --- ELIMINAR ---
+            with tab_elim:
+                st.warning("⚠️ Esta acción borrará al empleado permanentemente. No se puede deshacer.")
+                confirmar = st.checkbox("Sí, estoy seguro de eliminar a este empleado")
+                if st.button("🗑️ Eliminar Definitivamente", type="primary"):
+                    if confirmar:
+                        try:
+                            db.table("empleados").delete().eq("cedula", empleado_sel).execute()
+                            st.success(f"🗑️ {datos_emp['nombre']} eliminado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al eliminar: {e}")
+                    else:
+                        st.error("Debes marcar la casilla de confirmación.")
 # ============================================================
 # MÓDULO: TASA BCV
 # ============================================================
